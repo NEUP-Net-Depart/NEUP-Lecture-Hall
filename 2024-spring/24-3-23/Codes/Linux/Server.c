@@ -8,7 +8,6 @@
 
 #define PORT 10086
 #define BUFFER_SIZE 1024
-#define FILE_LENGTH_SIZE 65536
 
 int GetFile();
 int serverSocket, msgSocket;
@@ -17,42 +16,29 @@ int addrlen = sizeof(address);
 
 int main() {
     char receiveBuffer[BUFFER_SIZE], sendBuffer[BUFFER_SIZE];
-    struct sockaddr_in address;
-    int serverSocket, msgSocket, addrlen = sizeof(address);
 
-    // Initialize address structure
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_ANY);
     address.sin_port = htons(PORT);
 
     // Create socket
-    if ((serverSocket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("Socket creation error");
-        exit(EXIT_FAILURE);
-    }
+    serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 
     // Bind address and port
-    if (bind(serverSocket, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("Bind failed");
-        exit(EXIT_FAILURE);
-    }
+    bind(serverSocket, (struct sockaddr *)&address, sizeof(address));
 
     // Listen for connections
-    if (listen(serverSocket, 5) < 0) {
-        perror("Listen failed");
-        exit(EXIT_FAILURE);
-    }
+    listen(serverSocket, 5);
     printf("Server >> ready to get connection\n");
+
 
     while(1) {
         memset(sendBuffer, 0, BUFFER_SIZE);
         memset(receiveBuffer, 0, BUFFER_SIZE);
         msgSocket = accept(serverSocket, (struct sockaddr *)&address, (socklen_t*)&addrlen);
-        if (msgSocket < 0) {
-            perror("Accept failed");
-            continue;  // Continue to the next iteration of the loop
+        if (msgSocket) {
+            printf("Server >> Get Client\n");
         }
-        printf("Server >> Get Client\n");
 
         recv(msgSocket, receiveBuffer, BUFFER_SIZE, 0);
 
@@ -70,16 +56,17 @@ int main() {
                 printf("File receive failed\n");
             } // Start file operation
         }
-        else {
+        else if (msgSocket != -1) {
             strcat(sendBuffer, "Server >> Message: ");
             strcat(sendBuffer, receiveBuffer);
             strcat(sendBuffer, " Got!");
             send(msgSocket, sendBuffer, strlen(sendBuffer), 0);
             printf("Reply sent to client: %s\n", sendBuffer);
+        } else {
+            printf("Server >> Failed to receive message from client\n");
         }
     }
 
-    close(msgSocket);
     close(serverSocket);
     return 0;
 }
@@ -100,11 +87,12 @@ int GetFile() {
     memset(sendBuffer, 0, BUFFER_SIZE);
 
     int i;
-    for (i = 0; i < BUFFER_SIZE; i++) {
+    for (i = 0; i < BUFFER_SIZE; ++i) {
         if (filename[i] == '\0' || filename[i] == '\n') {
             break;
         }
     }
+    //printf("debug: %d\n",strlen(filename));
     if (i < BUFFER_SIZE) {
         for (int j = i + 1; j < BUFFER_SIZE; j++) {
             filename[j] = '\0';
@@ -115,23 +103,41 @@ int GetFile() {
 
     FILE *fptr;
     fptr = fopen(filename, "wb");
-    if (fptr == NULL)
-    {
+    if (fptr == NULL) {
         fprintf(stderr, "Error opening file for writing\n");
         return 1;
     }
 
-    char receiveBuffer[FILE_LENGTH_SIZE] = {0};
+    char receiveBuffer[BUFFER_SIZE] = {0};
     ssize_t bytesReceived;
+    printf("Server >> Ready to recieve now!\n");
 
-    msgSocket = accept(serverSocket, (struct sockaddr *)&address, (socklen_t*)&addrlen);
-    bytesReceived = recv(msgSocket, receiveBuffer, FILE_LENGTH_SIZE, 0);
-    if (bytesReceived > 0) {
-        fwrite(receiveBuffer, 1, (size_t)bytesReceived, fptr);
+    while (1) {
+        bytesReceived = recv(msgSocket, receiveBuffer, BUFFER_SIZE, 0);
+        if (bytesReceived < 0) {
+            fprintf(stderr, "Error in receiving file data\n");
+            fclose(fptr);
+            return 1;
+        } else if (bytesReceived == 0) {
+            // 连接关闭或其他错误处理
+            printf("Server >> while in file, break!");
+            fclose(fptr);
+            return 1;
+        } else if (strncmp(receiveBuffer, "FileOff", 7) == 0) {
+            printf("Server >> File received Finish!\n");
+            memset(sendBuffer, 0, BUFFER_SIZE);
+            strcat(sendBuffer, "Server >> File received Finish!");
+            send(msgSocket, sendBuffer, strlen(sendBuffer), 0);
+            fclose(fptr);
+            return 0;
+        } else {
+            send(msgSocket, "Server >> File data received!", 29, 0);
+            printf("Server >> File data received!\n");
+            fwrite(receiveBuffer, 1, (size_t) bytesReceived, fptr);
+            memset(receiveBuffer, 0, BUFFER_SIZE);
+        }
     }
 
-    strcat(sendBuffer, "Server >> File received Finish!");
-    send(msgSocket, sendBuffer, strlen(sendBuffer), 0);
     fclose(fptr);
     return 0;
 }

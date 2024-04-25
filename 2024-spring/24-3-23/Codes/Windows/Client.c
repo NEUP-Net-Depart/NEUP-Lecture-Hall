@@ -5,7 +5,7 @@
 
 #pragma comment(lib, "ws2_32.lib")
 
-#define SERVER_IP "127.0.0.1"
+#define SERVER_IP "192.168.147.128"
 #define PORT 10086
 #define BUFFER_SIZE 1024
 
@@ -22,7 +22,7 @@ void getWorkingDirectory();
 
 SOCKET clientSocket;
 SOCKADDR_IN server_socket;
-
+///*
 int main()
 {
     WSADATA wsa;
@@ -32,7 +32,7 @@ int main()
         return 1;
     }
 
-    SendPieceMessage("Test.txt");
+    SendPieceMessage("FileOff");
     SendPieceMessage("Hi");
 
     SendFile("../test.txt");
@@ -43,7 +43,7 @@ int main()
     WSACleanup();
     return 0;
 }
-
+//*/
 int ConnectToServer(SOCKET* clientSocket, SOCKADDR_IN* server_socket)
 {
     (*clientSocket) = socket(AF_INET, SOCK_STREAM, 0);
@@ -109,38 +109,34 @@ int SendFile(const char* filename)
 
     SendPieceMessage("Test.txt");
 
-    // make buffer & Copy to buffer
-    char* buffer = (char*)malloc(file_size);
-    if (buffer == NULL)
+    char buffer[BUFFER_SIZE];
+    size_t read_size;
+
+    // Read and send file in chunks
+    while ((read_size = fread(buffer, 1, BUFFER_SIZE, file)) > 0)
     {
-        printf("Failed to allocate memory for file content.\n");
-        fclose(file);
-        return 1;
-    }
-    size_t result = fread(buffer, 1, file_size, file);
-    if (result != file_size)
-    {
-        printf("Failed to read file: %s\n", filename);
-        free(buffer);
-        fclose(file);
-        return 1;
+        if (send(clientSocket, buffer, read_size, 0) == SOCKET_ERROR)
+        {
+            printf("Send failed with error code: %d\n", WSAGetLastError());
+            printf("Failed to send file chunk.\n");
+            fclose(file);
+            return 1;
+        }
+        else
+        {
+            printf("Message: {  %s  } Sent!\n", buffer);
+        }
     }
 
-    size_t actual_file_size = result;
-    while (actual_file_size > 0 && buffer[actual_file_size - 1] == EOF)
-    {
-        actual_file_size--;
-    }
-    char* true_buffer = (char*)malloc(actual_file_size);
-    memcpy(true_buffer, buffer, actual_file_size);
+    // Signal end of file
+    send(clientSocket, "FileOff", 7, 0);
+    memset(buffer, 0, BUFFER_SIZE);
+    ReceiveMessage(clientSocket, buffer);
 
-    // close file & send buffer, then free the buffer
+    // Close file
     fclose(file);
-    int sendResult = SendPieceMessage(true_buffer);
-    free(buffer);
-    free(true_buffer);
 
-    return sendResult;
+    return 0;
 }
 
 int ReceiveMessage(SOCKET clientSocket, char* buffer)
